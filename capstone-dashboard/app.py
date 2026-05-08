@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+import plotly.express as px
 
 # -------------------------------------------------------------------
 # Page setup
@@ -84,7 +85,7 @@ def load_data(path: Path) -> pd.DataFrame:
     df["Source_Date"] = pd.to_datetime(df["Source_Date"], errors="coerce")
     df["Source_Year"] = df["Source_Date"].dt.year
 
-    text_cols = df.select_dtypes(include="object").columns
+    text_cols = df.select_dtypes(include=["object", "string"]).columns
     df[text_cols] = df[text_cols].fillna("").apply(
         lambda col: col.map(lambda x: x.strip() if isinstance(x, str) else x)
     )
@@ -142,7 +143,7 @@ def load_coverage_matrix(path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     tracker = tracker[PLATFORM_TRACKER_COLUMNS]
 
     for frame in [summary, tracker]:
-        text_cols = frame.select_dtypes(include="object").columns
+        text_cols = frame.select_dtypes(include=["object", "str", "string"]).columns
         frame[text_cols] = frame[text_cols].fillna("").apply(
             lambda col: col.map(lambda x: x.strip() if isinstance(x, str) else x)
         )
@@ -157,6 +158,28 @@ coverage_summary_df, platform_tracker_df = load_coverage_matrix(COVERAGE_PATH)
 # -------------------------------------------------------------------
 # Helper functions
 # -------------------------------------------------------------------
+
+def top_n_with_other(
+    counts_df: pd.DataFrame,
+    category_col: str,
+    value_col: str,
+    n: int = 5,
+) -> pd.DataFrame:
+    if len(counts_df) <= n:
+        return counts_df.copy()
+
+    top = counts_df.head(n).copy()
+    other_count = counts_df.iloc[n:][value_col].sum()
+
+    other = pd.DataFrame(
+        [{category_col: "Other", value_col: other_count}]
+    )
+
+    return pd.concat([top, other], ignore_index=True)
+
+def short_label(value: str, max_len: int = 42) -> str:
+    value = str(value)
+    return value if len(value) <= max_len else value[: max_len - 3] + "..."
 
 def count_series(series: pd.Series, denominator: int | None = None) -> pd.DataFrame:
     clean = series.dropna()
@@ -221,7 +244,8 @@ def apply_filters(data: pd.DataFrame) -> pd.DataFrame:
         years = sorted([int(y) for y in filtered["Source_Year"].dropna().unique()])
         if years:
             selected_years = st.multiselect("Source year", years, default=years)
-            filtered = filtered[filtered["Source_Year"].isin(selected_years)]
+            if selected_years:
+                filtered = filtered[filtered["Source_Year"].isin(selected_years)]
 
         idps = sorted([x for x in filtered["IdP_Context"].dropna().unique() if x])
         selected_idps = st.multiselect("IdP context", idps, default=idps)
@@ -240,6 +264,42 @@ def apply_filters(data: pd.DataFrame) -> pd.DataFrame:
 
     return filtered
 
+def donut_chart(counts_df: pd.DataFrame, names_col: str, values_col: str, title: str):
+    fig = px.pie(
+        counts_df,
+        names=names_col,
+        values=values_col,
+        hole=0.45,
+        title=title,
+    )
+    fig.update_traces(textposition="inside", textinfo="percent")
+    fig.update_layout(
+        showlegend=True,
+        title_font_size=24,
+        font_size=16,
+        margin=dict(t=60, b=20, l=20, r=20),
+    )
+    return fig
+
+
+def horizontal_bar(counts_df: pd.DataFrame, category_col: str, value_col: str, title: str):
+    chart_df = counts_df.sort_values(value_col, ascending=True)
+    fig = px.bar(
+        chart_df,
+        x=value_col,
+        y=category_col,
+        orientation="h",
+        title=title,
+        text=value_col,
+    )
+    fig.update_layout(
+        title_font_size=24,
+        font_size=16,
+        margin=dict(t=60, b=30, l=20, r=20),
+        yaxis_title="",
+        xaxis_title="Count",
+    )
+    return fig
 
 filtered_df = apply_filters(df)
 
@@ -262,114 +322,296 @@ misconfiguration taxonomy, control-gap mapping, and Defense Coverage Matrix for 
 # Tabs
 # -------------------------------------------------------------------
 
-tab_overview, tab_prevalence, tab_incidents, tab_misconfigs, tab_defense, tab_scenario = st.tabs(
+tab_board, tab_defense, tab_findings, tab_scenario, tab_incidents, tab_method = st.tabs(
     [
-        "Overview",
-        "Prevalence Analysis",
-        "Incident Explorer",
-        "Misconfiguration + Controls",
+        "Board Briefing",
         "Defense Coverage Matrix",
+        "Findings Explorer",
         "Scenario Walkthrough",
+        "Incident Explorer",
+        "Analyst Appendix",
     ]
 )
 
 
 # -------------------------------------------------------------------
-# Overview
+# Board Briefing
 # -------------------------------------------------------------------
 
-with tab_overview:
-    st.subheader("Executive Summary")
+with tab_board:
+    st.markdown("# Board Briefing")
+    st.markdown(
+        "Decision-focused summary of SaaS OAuth post-SSO abuse patterns, mapped to practical defense priorities."
+    )
 
     total_incidents = len(filtered_df)
     date_min = filtered_df["Source_Date"].min()
     date_max = filtered_df["Source_Date"].max()
 
-    top_attack = (
-        filtered_df["Attack_Type"].value_counts().idxmax()
-        if not filtered_df["Attack_Type"].dropna().empty
-        else "N/A"
+    attack_counts = count_series(filtered_df["Attack_Type"], total_incidents)
+    impact_counts = count_series(filtered_df["Impact_Primary"], total_incidents)
+    idp_counts = count_series(filtered_df["IdP_Context"], total_incidents)
+    misconfig_any = any_occurrence_count(
+        filtered_df, "Misconfig_1", "Misconfig_2", "Misconfiguration"
+    )
+    controls_any = any_occurrence_count(
+        filtered_df, "Controls_1", "Controls_2", "Control Gap"
     )
 
-    top_idp = (
-        filtered_df["IdP_Context"].value_counts().idxmax()
-        if not filtered_df["IdP_Context"].dropna().empty
-        else "N/A"
-    )
+    top_attack_row = attack_counts.iloc[0] if not attack_counts.empty else None
+    top_misconfig_row = misconfig_any.iloc[0] if not misconfig_any.empty else None
+    top_control_row = controls_any.iloc[0] if not controls_any.empty else None
 
-    top_impact = (
-        filtered_df["Impact_Primary"].value_counts().idxmax()
-        if not filtered_df["Impact_Primary"].dropna().empty
-        else "N/A"
-    )
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
 
-    col1, col2, col3, col4 = st.columns(4)
+    kpi1.metric("Coded Incidents", total_incidents)
 
-    col1.metric("Incidents", total_incidents)
-    col2.metric("Top IdP Context", top_idp)
-    col3.metric("Top Attack Type", top_attack)
-    col4.metric("Top Impact", top_impact)
+    if top_attack_row is not None:
+        kpi2.metric(
+            "Top Attack Pattern",
+            short_label(top_attack_row["Category"]),
+            f"{top_attack_row['Count']} cases / {top_attack_row['Percent']}%",
+        )
+    else:
+        kpi2.metric("Top Attack Pattern", "N/A")
+
+    if top_misconfig_row is not None:
+        kpi3.metric(
+            "Top Misconfiguration",
+            short_label(top_misconfig_row["Misconfiguration"]),
+            f"{top_misconfig_row['Count']} cases / {top_misconfig_row['Percent']}%",
+        )
+    else:
+        kpi3.metric("Top Misconfiguration", "N/A")
+
+    if top_control_row is not None:
+        kpi4.metric(
+            "Top Control Gap",
+            short_label(top_control_row["Control Gap"]),
+            f"{top_control_row['Count']} cases / {top_control_row['Percent']}%",
+        )
+    else:
+        kpi4.metric("Top Control Gap", "N/A")
 
     if pd.notna(date_min) and pd.notna(date_max):
         st.caption(f"Filtered date range: {date_min.date()} to {date_max.date()}")
 
-    st.markdown("### Dataset by Year")
-    year_counts = count_series(filtered_df["Source_Year"].astype("Int64").astype(str), len(filtered_df))
-    if not year_counts.empty:
-        st.bar_chart(year_counts.set_index("Category")["Count"])
-    else:
-        st.info("No year data available for the current filters.")
+    st.divider()
 
-    st.markdown("### Confidence Distribution")
-    confidence_counts = count_series(filtered_df["Confidence"], len(filtered_df))
-    if not confidence_counts.empty:
-        st.bar_chart(confidence_counts.set_index("Category")["Count"])
-    else:
-        st.info("No confidence data available for the current filters.")
+    chart_col1, chart_col2 = st.columns(2)
+
+    with chart_col1:
+        if not attack_counts.empty:
+            st.plotly_chart(
+                donut_chart(
+                    top_n_with_other(attack_counts, "Category", "Count", n=5),
+                    "Category",
+                    "Count",
+                    "Attack Type Share",
+                ),
+                width="stretch",
+            )
+        else:
+            st.info("No attack type data available for the current filters.")
+
+    with chart_col2:
+        if not impact_counts.empty:
+            st.plotly_chart(
+                donut_chart(
+                    top_n_with_other(impact_counts, "Category", "Count", n=5),
+                    "Category",
+                    "Count",
+                    "Primary Impact Share",
+                ),
+                width="stretch",
+            )
+        else:
+            st.info("No impact data available for the current filters.")
+
+    chart_col3, chart_col4 = st.columns(2)
+
+    with chart_col3:
+        if not idp_counts.empty:
+            st.plotly_chart(
+                donut_chart(
+                    top_n_with_other(idp_counts, "Category", "Count", n=5),
+                    "Category",
+                    "Count",
+                    "IdP Context Share",
+                ),
+                width="stretch",
+            )
+        else:
+            st.info("No IdP context data available for the current filters.")
+
+    with chart_col4:
+        if not controls_any.empty:
+            st.plotly_chart(
+                horizontal_bar(
+                    controls_any.head(8),
+                    "Control Gap",
+                    "Count",
+                    "Most Frequent Control Gaps",
+                ),
+                width="stretch",
+            )
+        else:
+            st.info("No control gap data available for the current filters.")
+
+    st.markdown("## Main Finding")
+    st.info(
+        "OAuth abuse is not only an authentication issue. The recurring risk pattern is weak application governance, token control, and post-consent visibility. The Defense Coverage Matrix turns those patterns into hardening priorities."
+    )
+
+    if not coverage_summary_df.empty:
+        st.markdown("## Defense Matrix Priority")
+        start_here_count = int(
+            (coverage_summary_df["Blueprint Tier"].str.strip() == "Start Here").sum()
+        )
+        st.success(
+            f"The Defense Coverage Matrix currently identifies {start_here_count} Start Here control categories. Use the Defense Coverage Matrix tab as the main hardening roadmap."
+        )
 
 
 # -------------------------------------------------------------------
-# Prevalence Analysis
+# Findings Explorer
 # -------------------------------------------------------------------
 
-with tab_prevalence:
-    st.subheader("Prevalence Analysis")
+with tab_findings:
+    st.markdown("# Findings Explorer")
+    st.markdown(
+        "Select a finding to see its frequency, supporting incidents, and — when applicable — Defense Coverage Matrix alignment."
+    )
 
-    st.markdown("### Attack Types")
-    attack_counts = count_series(filtered_df["Attack_Type"], len(filtered_df))
-    st.dataframe(attack_counts, use_container_width=True, hide_index=True)
-    if not attack_counts.empty:
-        st.bar_chart(attack_counts.set_index("Category")["Count"])
+    total_incidents = len(filtered_df)
 
-    st.markdown("### Entry Vectors")
-    entry_counts = count_series(filtered_df["Entry_Vector"], len(filtered_df))
-    st.dataframe(entry_counts, use_container_width=True, hide_index=True)
-    if not entry_counts.empty:
-        st.bar_chart(entry_counts.set_index("Category")["Count"])
+    attack_counts = count_series(filtered_df["Attack_Type"], total_incidents)
+    impact_counts = count_series(filtered_df["Impact_Primary"], total_incidents)
+    entry_counts = count_series(filtered_df["Entry_Vector"], total_incidents)
+    misconfig_any = any_occurrence_count(
+        filtered_df, "Misconfig_1", "Misconfig_2", "Misconfiguration"
+    )
+    controls_any = any_occurrence_count(
+        filtered_df, "Controls_1", "Controls_2", "Control Gap"
+    )
 
-    st.markdown("### Primary Misconfigurations")
-    misconfig_primary = count_series(filtered_df["Misconfig_1"], len(filtered_df))
-    st.dataframe(misconfig_primary, use_container_width=True, hide_index=True)
-    if not misconfig_primary.empty:
-        st.bar_chart(misconfig_primary.set_index("Category")["Count"])
+    finding_type = st.radio(
+        "Finding type",
+        ["Attack Type", "Entry Vector", "Misconfiguration", "Control Gap", "Impact"],
+        horizontal=True,
+    )
 
-    st.markdown("### Any-Occurrence Misconfigurations")
-    misconfig_any = any_occurrence_count(filtered_df, "Misconfig_1", "Misconfig_2", "Misconfiguration")
-    st.dataframe(misconfig_any, use_container_width=True, hide_index=True)
-    if not misconfig_any.empty:
-        st.bar_chart(misconfig_any.set_index("Misconfiguration")["Count"])
+    if finding_type == "Attack Type":
+        source_df = attack_counts.copy()
+        label_col = "Category"
+        source_column = "Attack_Type"
+    elif finding_type == "Entry Vector":
+        source_df = entry_counts.copy()
+        label_col = "Category"
+        source_column = "Entry_Vector"
+    elif finding_type == "Misconfiguration":
+        source_df = misconfig_any.rename(columns={"Misconfiguration": "Category"})
+        label_col = "Category"
+        source_column = None
+    elif finding_type == "Control Gap":
+        source_df = controls_any.rename(columns={"Control Gap": "Category"})
+        label_col = "Category"
+        source_column = None
+    else:
+        source_df = impact_counts.copy()
+        label_col = "Category"
+        source_column = "Impact_Primary"
 
-    st.markdown("### Primary Control Gaps")
-    controls_primary = count_series(filtered_df["Controls_1"], len(filtered_df))
-    st.dataframe(controls_primary, use_container_width=True, hide_index=True)
-    if not controls_primary.empty:
-        st.bar_chart(controls_primary.set_index("Category")["Count"])
+    if source_df.empty:
+        st.info("No findings available for the current filters.")
+    else:
+        selected_finding = st.selectbox(
+            "Select finding",
+            source_df[label_col].astype(str).tolist(),
+        )
 
-    st.markdown("### Any-Occurrence Control Gaps")
-    controls_any = any_occurrence_count(filtered_df, "Controls_1", "Controls_2", "Control Gap")
-    st.dataframe(controls_any, use_container_width=True, hide_index=True)
-    if not controls_any.empty:
-        st.bar_chart(controls_any.set_index("Control Gap")["Count"])
+        selected_row = source_df[source_df[label_col] == selected_finding].iloc[0]
+
+        metric_col1, metric_col2, metric_col3 = st.columns(3)
+        metric_col1.metric("Finding", selected_finding)
+        metric_col2.metric("Cases", int(selected_row["Count"]))
+        metric_col3.metric("Share of Filtered Dataset", f"{selected_row['Percent']}%")
+
+        st.plotly_chart(
+            horizontal_bar(
+                source_df.head(10),
+                label_col,
+                "Count",
+                f"Top {finding_type} Findings",
+            ),
+            width="stretch",
+        )
+
+        st.divider()
+
+        if finding_type == "Misconfiguration":
+            supporting = filtered_df[
+                (filtered_df["Misconfig_1"] == selected_finding)
+                | (filtered_df["Misconfig_2"] == selected_finding)
+            ]
+
+            st.markdown("## Defense Coverage Matrix Alignment")
+            coverage = coverage_for_misconfigs(coverage_summary_df, [selected_finding])
+
+            if not coverage.empty:
+                for _, row in coverage.iterrows():
+                    with st.container(border=True):
+                        st.markdown(f"### {row['Misconfiguration Category']}")
+                        st.markdown(f"**Primary Control Family:** {row['Primary Control Family']}")
+                        st.markdown(f"**Coverage Purpose:** {row['Coverage Purpose']}")
+                        st.markdown(f"**Blueprint Tier:** {row['Blueprint Tier']}")
+
+                        with st.expander("Recommended hardened baseline"):
+                            st.write(row["Recommended Hardened Baseline"])
+
+                        with st.expander("Residual gap / process need"):
+                            st.write(row["Residual Gap / Process Need"])
+            else:
+                st.warning("No matching Defense Coverage Matrix row found for this misconfiguration.")
+
+        elif finding_type == "Control Gap":
+            supporting = filtered_df[
+                (filtered_df["Controls_1"] == selected_finding)
+                | (filtered_df["Controls_2"] == selected_finding)
+            ]
+
+        else:
+            supporting = filtered_df[filtered_df[source_column] == selected_finding]
+
+        st.markdown("## Supporting Incidents")
+
+        supporting_columns = [
+            "Incident_ID",
+            "Source_Date",
+            "IdP_Context",
+            "SaaS_Context",
+            "Attack_Type",
+            "Entry_Vector",
+            "Misconfig_1",
+            "Misconfig_2",
+            "Controls_1",
+            "Controls_2",
+            "Impact_Primary",
+            "Confidence",
+            "Source_URL",
+        ]
+
+        supporting_view = supporting[supporting_columns].copy()
+        supporting_view["Source_Date"] = supporting_view["Source_Date"].dt.date
+
+        st.dataframe(
+            supporting_view,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "Source_URL": st.column_config.LinkColumn("Source URL"),
+            },
+        )
 
 
 # -------------------------------------------------------------------
@@ -400,69 +642,12 @@ with tab_incidents:
 
     st.dataframe(
         incident_table,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
+        column_config={
+            "Source_URL": st.column_config.LinkColumn("Source URL"),
+        },
     )
-
-
-# -------------------------------------------------------------------
-# Misconfiguration + Controls
-# -------------------------------------------------------------------
-
-with tab_misconfigs:
-    st.subheader("Misconfiguration and Control Mapping")
-
-    st.markdown(
-        """
-The primary-only view uses `Misconfig_1` and `Controls_1` for dominant-pattern analysis.
-The any-occurrence view treats a category as present when it appears in either `_1` or `_2`.
-"""
-    )
-
-    misconfig_any = any_occurrence_count(filtered_df, "Misconfig_1", "Misconfig_2", "Misconfiguration")
-    controls_any = any_occurrence_count(filtered_df, "Controls_1", "Controls_2", "Control Gap")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.markdown("### Misconfigurations")
-        st.dataframe(misconfig_any, use_container_width=True, hide_index=True)
-
-    with col2:
-        st.markdown("### Control Gaps")
-        st.dataframe(controls_any, use_container_width=True, hide_index=True)
-
-    st.markdown("### Misconfiguration to Control Pairings")
-
-    pair_rows = []
-
-    for _, row in filtered_df.iterrows():
-        misconfigs = [row["Misconfig_1"], row["Misconfig_2"]]
-        controls = [row["Controls_1"], row["Controls_2"]]
-
-        for misconfig in misconfigs:
-            for control in controls:
-                if str(misconfig).strip() and str(control).strip():
-                    pair_rows.append(
-                        {
-                            "Misconfiguration": misconfig,
-                            "Control Gap": control,
-                            "Incident_ID": row["Incident_ID"],
-                        }
-                    )
-
-    if pair_rows:
-        pair_df = pd.DataFrame(pair_rows)
-        pair_counts = (
-            pair_df.groupby(["Misconfiguration", "Control Gap"])
-            .size()
-            .reset_index(name="Count")
-            .sort_values("Count", ascending=False)
-        )
-        st.dataframe(pair_counts, use_container_width=True, hide_index=True)
-    else:
-        st.info("No misconfiguration/control pairings found for the current filters.")
-
 
 # -------------------------------------------------------------------
 # Defense Coverage Matrix
@@ -504,7 +689,7 @@ what it is supposed to cover, what the hardened baseline should be, and what res
         metric2.metric("Categories in Current Filters", len(incident_coverage_df))
         metric3.metric(
             "Start Here Controls",
-            int((coverage_summary_df["Blueprint Tier"] == "Start Here").sum()),
+            int((coverage_summary_df["Blueprint Tier"].str.strip() == "Start Here").sum()),
         )
         metric4.metric(
             "Residual Gaps Documented",
@@ -541,10 +726,34 @@ what it is supposed to cover, what the hardened baseline should be, and what res
                 filtered_coverage_view["Coverage Purpose"].isin(selected_purposes)
             ]
 
+        st.markdown("## Priority Controls: Start Here")
+
+        start_here_df = filtered_coverage_view[
+            filtered_coverage_view["Blueprint Tier"].str.strip() == "Start Here"
+        ].copy()
+
+        if start_here_df.empty:
+            st.info("No Start Here controls are present in the current coverage view.")
+        else:
+            for _, row in start_here_df.iterrows():
+                with st.container(border=True):
+                    st.markdown(f"### {row['Misconfiguration Category']}")
+                    st.markdown(f"**Primary Control Family:** {row['Primary Control Family']}")
+                    st.markdown(f"**Coverage Purpose:** {row['Coverage Purpose']}")
+
+                    with st.expander("Default posture question"):
+                        st.write(row["Default Posture Question"])
+
+                    with st.expander("Recommended hardened baseline"):
+                        st.write(row["Recommended Hardened Baseline"])
+
+                    with st.expander("Residual gap / process need"):
+                        st.write(row["Residual Gap / Process Need"])
+
         st.markdown("### Coverage Summary")
         st.dataframe(
             filtered_coverage_view,
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
             column_config={
                 "Default Posture Question": st.column_config.TextColumn(width="large"),
@@ -557,7 +766,15 @@ what it is supposed to cover, what the hardened baseline should be, and what res
             st.markdown("### Blueprint Tier Distribution")
             tier_counts = filtered_coverage_view["Blueprint Tier"].value_counts().reset_index()
             tier_counts.columns = ["Blueprint Tier", "Count"]
-            st.bar_chart(tier_counts.set_index("Blueprint Tier")["Count"])
+            st.plotly_chart(
+                horizontal_bar(
+                    tier_counts,
+                    "Blueprint Tier",
+                    "Count",
+                    "Blueprint Tier Distribution",
+                ),
+                width="stretch",
+            )
 
             st.download_button(
                 "Download current coverage view as CSV",
@@ -601,8 +818,79 @@ what it is supposed to cover, what the hardened baseline should be, and what res
                     tracker_view["Misconfiguration Category"].isin(selected_tracker_misconfigs)
                 ]
 
-            st.dataframe(tracker_view, use_container_width=True, hide_index=True)
+            st.dataframe(tracker_view, width="stretch", hide_index=True)
 
+# -------------------------------------------------------------------
+# Analyst Appendix
+# -------------------------------------------------------------------
+
+with tab_method:
+    st.markdown("# Analyst Appendix")
+    st.markdown(
+        "Raw prevalence tables and coding views for analyst review. This section supports transparency but is intentionally separated from the board-facing view."
+    )
+
+    total_incidents = len(filtered_df)
+
+    st.markdown("## Prevalence Tables")
+
+    appendix_section = st.selectbox(
+        "Select table",
+        [
+            "Attack Types",
+            "Entry Vectors",
+            "Primary Misconfigurations",
+            "Any-Occurrence Misconfigurations",
+            "Primary Control Gaps",
+            "Any-Occurrence Control Gaps",
+            "Confidence",
+            "IdP Context",
+        ],
+    )
+
+    if appendix_section == "Attack Types":
+        table_df = count_series(filtered_df["Attack_Type"], total_incidents)
+        chart_col = "Category"
+    elif appendix_section == "Entry Vectors":
+        table_df = count_series(filtered_df["Entry_Vector"], total_incidents)
+        chart_col = "Category"
+    elif appendix_section == "Primary Misconfigurations":
+        table_df = count_series(filtered_df["Misconfig_1"], total_incidents)
+        chart_col = "Category"
+    elif appendix_section == "Any-Occurrence Misconfigurations":
+        table_df = any_occurrence_count(
+            filtered_df, "Misconfig_1", "Misconfig_2", "Misconfiguration"
+        )
+        chart_col = "Misconfiguration"
+    elif appendix_section == "Primary Control Gaps":
+        table_df = count_series(filtered_df["Controls_1"], total_incidents)
+        chart_col = "Category"
+    elif appendix_section == "Any-Occurrence Control Gaps":
+        table_df = any_occurrence_count(
+            filtered_df, "Controls_1", "Controls_2", "Control Gap"
+        )
+        chart_col = "Control Gap"
+    elif appendix_section == "Confidence":
+        table_df = count_series(filtered_df["Confidence"], total_incidents)
+        chart_col = "Category"
+    else:
+        table_df = count_series(filtered_df["IdP_Context"], total_incidents)
+        chart_col = "Category"
+
+    st.dataframe(table_df, width="stretch", hide_index=True)
+
+    if not table_df.empty:
+        st.plotly_chart(
+            horizontal_bar(table_df, chart_col, "Count", appendix_section),
+            width="stretch",
+        )
+
+    st.download_button(
+        "Download filtered incidents as CSV",
+        data=filtered_df.to_csv(index=False).encode("utf-8"),
+        file_name="filtered_incidents.csv",
+        mime="text/csv",
+    )
 
 # -------------------------------------------------------------------
 # Scenario Walkthrough
@@ -622,23 +910,45 @@ with tab_scenario:
 
         st.markdown(f"### {row['Incident_ID']}")
 
+        st.markdown("## Scenario Path")
+
+        path_col1, path_col2, path_col3, path_col4 = st.columns(4)
+
+        with path_col1:
+            st.container(border=True).markdown(
+                f"### 1. Entry\n**{row['Entry_Vector'] or 'N/A'}**"
+            )
+
+        with path_col2:
+            st.container(border=True).markdown(
+                f"### 2. OAuth Abuse\n**{row['Attack_Type'] or 'N/A'}**"
+            )
+
+        with path_col3:
+            st.container(border=True).markdown(
+                f"### 3. Misconfiguration\n**{row['Misconfig_1'] or 'N/A'}**"
+            )
+
+        with path_col4:
+            st.container(border=True).markdown(
+                f"### 4. Control Gap\n**{row['Controls_1'] or 'N/A'}**"
+            )
+
+        st.divider()
+
         col1, col2 = st.columns(2)
 
         with col1:
-            st.markdown("#### Attack Chain")
-            st.write(f"**Entry Vector:** {row['Entry_Vector']}")
-            st.write(f"**Attack Type:** {row['Attack_Type']}")
-            st.write(f"**OAuth Flow:** {row['OAuth_Flow']}")
-            st.write(f"**Token Artifacts:** {row['Token_Artifacts']}")
-            st.write(f"**Impact:** {row['Impact_Primary']}")
+            st.markdown("### Technical Context")
+            st.write(f"**OAuth Flow:** {row['OAuth_Flow'] or 'N/A'}")
+            st.write(f"**Token Artifacts:** {row['Token_Artifacts'] or 'N/A'}")
+            st.write(f"**Impact:** {row['Impact_Primary'] or 'N/A'}")
 
         with col2:
-            st.markdown("#### Control Analysis")
-            st.write(f"**Primary Misconfiguration:** {row['Misconfig_1']}")
+            st.markdown("### Coding Context")
             st.write(f"**Secondary Misconfiguration:** {row['Misconfig_2'] or 'N/A'}")
-            st.write(f"**Primary Control Gap:** {row['Controls_1']}")
             st.write(f"**Secondary Control Gap:** {row['Controls_2'] or 'N/A'}")
-            st.write(f"**Confidence:** {row['Confidence']}")
+            st.write(f"**Confidence:** {row['Confidence'] or 'N/A'}")
 
         if not coverage_summary_df.empty:
             st.markdown("#### Defense Coverage Matrix Alignment")
@@ -657,7 +967,7 @@ with tab_scenario:
                             "Blueprint Tier",
                         ]
                     ],
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
             else:
