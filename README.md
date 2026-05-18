@@ -1,2 +1,2 @@
 # TheForsakenAuthZ
-Mapping and mitigating SaaS OAuth post-SSO abuse. Sanitized dataset and reproducible prevalence artifacts.
+Mapping and mitigating SaaS OAuth abuse. Sanitized dataset and reproducible prevalence artifacts.
