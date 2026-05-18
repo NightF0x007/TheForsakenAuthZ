@@ -14,6 +14,11 @@ st.set_page_config(
     layout="wide",
 )
 
+LOGO_PATH = Path("capstone-dashboard/data/uw_logo.png")
+
+if LOGO_PATH.exists():
+    st.logo(str(LOGO_PATH), size="large")
+
 DATA_PATH = Path("capstone-dashboard/data/Sanitized_Export.csv")
 COVERAGE_PATH = Path("capstone-dashboard/data/Defense_Coverage_Matrix.xlsx")
 
