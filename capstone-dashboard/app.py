@@ -58,7 +58,6 @@ PLATFORM_TRACKER_COLUMNS = [
     "Evidence / Notes / URL",
 ]
 
-
 # -------------------------------------------------------------------
 # Data loading
 # -------------------------------------------------------------------
@@ -91,7 +90,6 @@ def load_data(path: Path) -> pd.DataFrame:
     )
 
     return df
-
 
 @st.cache_data
 def load_coverage_matrix(path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -150,10 +148,8 @@ def load_coverage_matrix(path: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     return summary, tracker
 
-
 df = load_data(DATA_PATH)
 coverage_summary_df, platform_tracker_df = load_coverage_matrix(COVERAGE_PATH)
-
 
 # -------------------------------------------------------------------
 # Helper functions
@@ -191,7 +187,6 @@ def count_series(series: pd.Series, denominator: int | None = None) -> pd.DataFr
     counts["Percent"] = (counts["Count"] / total * 100).round(1) if total else 0.0
     return counts
 
-
 def any_occurrence_count(data: pd.DataFrame, col1: str, col2: str, label: str) -> pd.DataFrame:
     values = []
 
@@ -211,7 +206,6 @@ def any_occurrence_count(data: pd.DataFrame, col1: str, col2: str, label: str) -
     result["Percent"] = (result["Count"] / len(data) * 100).round(1) if len(data) else 0.0
     return result
 
-
 def get_any_occurrence_values(data: pd.DataFrame, col1: str, col2: str) -> set[str]:
     values = set()
     for _, row in data.iterrows():
@@ -220,7 +214,6 @@ def get_any_occurrence_values(data: pd.DataFrame, col1: str, col2: str) -> set[s
             if value:
                 values.add(value)
     return values
-
 
 def coverage_for_misconfigs(
     coverage_summary: pd.DataFrame,
@@ -233,7 +226,6 @@ def coverage_for_misconfigs(
     return coverage_summary[
         coverage_summary["Misconfiguration Category"].isin(misconfig_set)
     ].copy()
-
 
 def apply_filters(data: pd.DataFrame) -> pd.DataFrame:
     filtered = data.copy()
@@ -281,7 +273,6 @@ def donut_chart(counts_df: pd.DataFrame, names_col: str, values_col: str, title:
     )
     return fig
 
-
 def horizontal_bar(counts_df: pd.DataFrame, category_col: str, value_col: str, title: str):
     chart_df = counts_df.sort_values(value_col, ascending=True)
     fig = px.bar(
@@ -301,30 +292,147 @@ def horizontal_bar(counts_df: pd.DataFrame, category_col: str, value_col: str, t
     )
     return fig
 
-filtered_df = apply_filters(df)
+def year_count_chart(data: pd.DataFrame, title: str):
+    yearly = (
+        data.dropna(subset=["Source_Year"])
+        .groupby("Source_Year")
+        .size()
+        .reset_index(name="Count")
+    )
+    yearly["Source_Year"] = yearly["Source_Year"].astype(int).astype(str)
 
+    fig = px.line(
+        yearly,
+        x="Source_Year",
+        y="Count",
+        markers=True,
+        title=title,
+    )
+    fig.update_layout(
+        title_font_size=24,
+        font_size=16,
+        xaxis_title="Year",
+        yaxis_title="Number of coded incidents",
+        margin=dict(t=60, b=30, l=20, r=20),
+    )
+    return fig
+
+
+def stacked_year_bar(data: pd.DataFrame, category_col: str, title: str, top_n: int = 5):
+    clean = data.dropna(subset=["Source_Year"]).copy()
+    clean = clean[clean[category_col].astype(str).str.strip() != ""]
+
+    top_categories = clean[category_col].value_counts().head(top_n).index.tolist()
+    clean[category_col] = clean[category_col].where(
+        clean[category_col].isin(top_categories),
+        "Other",
+    )
+
+    grouped = (
+        clean.groupby(["Source_Year", category_col])
+        .size()
+        .reset_index(name="Count")
+    )
+    grouped["Source_Year"] = grouped["Source_Year"].astype(int).astype(str)
+
+    fig = px.bar(
+        grouped,
+        x="Source_Year",
+        y="Count",
+        color=category_col,
+        title=title,
+    )
+    fig.update_layout(
+        title_font_size=24,
+        font_size=16,
+        xaxis_title="Year",
+        yaxis_title="Number of coded incidents",
+        legend_title="",
+        margin=dict(t=60, b=30, l=20, r=20),
+    )
+    return fig
+
+
+def category_heatmap(
+    data: pd.DataFrame,
+    row_col: str,
+    col_col: str,
+    title: str,
+):
+    clean = data.copy()
+    clean = clean[
+        (clean[row_col].astype(str).str.strip() != "")
+        & (clean[col_col].astype(str).str.strip() != "")
+    ]
+
+    if clean.empty:
+        return None
+
+    pivot = pd.crosstab(clean[row_col], clean[col_col])
+
+    fig = px.imshow(
+        pivot,
+        text_auto=True,
+        aspect="auto",
+        title=title,
+    )
+    fig.update_layout(
+        title_font_size=24,
+        font_size=15,
+        xaxis_title=col_col.replace("_", " "),
+        yaxis_title=row_col.replace("_", " "),
+        margin=dict(t=60, b=30, l=20, r=20),
+    )
+    return fig
+
+
+def any_occurrence_long(
+    data: pd.DataFrame,
+    col1: str,
+    col2: str,
+    label: str,
+) -> pd.DataFrame:
+    rows = []
+
+    for _, row in data.iterrows():
+        seen = set()
+        for col in [col1, col2]:
+            value = str(row.get(col, "")).strip()
+            if value and value not in seen:
+                rows.append(
+                    {
+                        "Incident_ID": row["Incident_ID"],
+                        "Source_Year": row["Source_Year"],
+                        label: value,
+                    }
+                )
+                seen.add(value)
+
+    return pd.DataFrame(rows)
+
+filtered_df = apply_filters(df)
 
 # -------------------------------------------------------------------
 # App title
 # -------------------------------------------------------------------
 
-st.title("SaaS OAuth Post-SSO Abuse Analysis Dashboard")
+st.title("SaaS OAuth Abuse Analysis Dashboard")
 
 st.markdown(
     """
-This dashboard provides an interactive view of the coded incident dataset, prevalence analysis,
-misconfiguration taxonomy, control-gap mapping, and Defense Coverage Matrix for the capstone project.
+#### This dashboard provides an interactive view of the 32 analyzed OAuth related incidents.
 """
 )
-
 
 # -------------------------------------------------------------------
 # Tabs
 # -------------------------------------------------------------------
 
-tab_board, tab_defense, tab_findings, tab_scenario, tab_incidents, tab_method = st.tabs(
+tab_problem, tab_board, tab_trends, tab_defense, tab_findings, tab_scenario, tab_incidents, tab_method = st.tabs(
     [
+        "The Problem",
         "Board Briefing",
+        "Trends + Risk Lens",
         "Defense Coverage Matrix",
         "Findings Explorer",
         "Scenario Walkthrough",
@@ -333,6 +441,57 @@ tab_board, tab_defense, tab_findings, tab_scenario, tab_incidents, tab_method = 
     ]
 )
 
+# -------------------------------------------------------------------
+# The Problem
+# -------------------------------------------------------------------
+
+with tab_problem:
+    st.markdown("# The Problem")
+
+    st.info(
+        "OAuth is the mechanism that lets one application access another service without sharing a user’s password. "
+        "That convenience also creates a security problem: if an attacker tricks a user, compromises an app, or steals a token, "
+        "they may keep access even after the normal login event is over."
+    )
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.container(border=True).markdown(
+            "### 1. User or admin authorizes access\n"
+            "A person signs in or approves an app request."
+        )
+
+    with col2:
+        st.container(border=True).markdown(
+            "### 2. App receives a token\n"
+            "The token becomes the app’s permission to call APIs."
+        )
+
+    with col3:
+        st.container(border=True).markdown(
+            "### 3. Attacker abuses that trust\n"
+            "If the app, token, or consent process is weak, access can persist."
+        )
+
+    st.markdown("## Why this matters")
+    st.markdown(
+        """
+        Security teams often know how to respond to suspicious logins, malware, or endpoint alerts.
+        OAuth abuse is harder because the activity can look like normal application access.
+        This project turns scattered public incident reporting into a vendor-neutral view of:
+        
+        - which OAuth abuse patterns appear most often,
+        - which misconfigurations enable them,
+        - and which controls reduce the risk.
+        """
+    )
+
+    st.markdown("## OAuth flow, simplified")
+    st.image("capstone-dashboard/data/OAuth_Flow_UML.png")
+    st.caption(
+        "Simplified OAuth flow: the user authorizes an application, the application receives a token, and the token is used to access SaaS resources."
+    )
 
 # -------------------------------------------------------------------
 # Board Briefing
@@ -341,8 +500,30 @@ tab_board, tab_defense, tab_findings, tab_scenario, tab_incidents, tab_method = 
 with tab_board:
     st.markdown("# Board Briefing")
     st.markdown(
-        "Decision-focused summary of SaaS OAuth post-SSO abuse patterns, mapped to practical defense priorities."
+        "Summary of SaaS OAuth abuse patterns, mapped to practical defense priorities."
     )
+
+    st.markdown("## How to read this dashboard")
+
+    read_col1, read_col2, read_col3 = st.columns(3)
+
+    with read_col1:
+        st.container(border=True).markdown(
+            "### Prevalence\n"
+            "Which OAuth abuse patterns appear most often in the coded public reports?"
+        )
+
+    with read_col2:
+        st.container(border=True).markdown(
+            "### Misconfiguration\n"
+            "Which tenant or application settings helped make the abuse possible?"
+        )
+
+    with read_col3:
+        st.container(border=True).markdown(
+            "### Defense coverage\n"
+            "Which controls reduce the risk, and where do residual gaps remain?"
+        )
 
     total_incidents = len(filtered_df)
     date_min = filtered_df["Source_Date"].min()
@@ -399,6 +580,17 @@ with tab_board:
     st.divider()
 
     chart_col1, chart_col2 = st.columns(2)
+    
+    st.markdown("## High-level trend")
+
+    if not filtered_df.empty:
+        st.plotly_chart(
+            year_count_chart(
+                filtered_df,
+                "Coded OAuth Abuse Reports Over Time",
+            ),
+            width="stretch",
+        )
 
     with chart_col1:
         if not attack_counts.empty:
@@ -472,6 +664,156 @@ with tab_board:
             f"The Defense Coverage Matrix currently identifies {start_here_count} Start Here control categories. Use the Defense Coverage Matrix tab as the main hardening roadmap."
         )
 
+# -------------------------------------------------------------------
+# Trends + Risk Lens
+# -------------------------------------------------------------------
+
+with tab_trends:
+    st.markdown("# Trends + Risk Lens")
+    st.markdown(
+        "Security-focused analytics that show how OAuth abuse patterns, misconfigurations, and control gaps appear across the coded dataset."
+    )
+
+    total_incidents = len(filtered_df)
+
+    if total_incidents == 0:
+        st.info("No incidents match the current filters.")
+    else:
+        st.markdown("## Reporting trend over time")
+
+        trend_col1, trend_col2 = st.columns(2)
+
+        with trend_col1:
+            st.plotly_chart(
+                year_count_chart(
+                    filtered_df,
+                    "Coded Incidents by Year",
+                ),
+                width="stretch",
+            )
+
+        with trend_col2:
+            st.plotly_chart(
+                stacked_year_bar(
+                    filtered_df,
+                    "Attack_Type",
+                    "Attack Types Over Time",
+                    top_n=5,
+                ),
+                width="stretch",
+            )
+
+        st.info(
+            "Use this view carefully: the chart shows trends in public reporting, not the true global rate of OAuth abuse. "
+            "It is still useful for showing which techniques recur across published incidents."
+        )
+
+        st.divider()
+
+        st.markdown("## Security risk lens")
+
+        heatmap_col1, heatmap_col2 = st.columns(2)
+
+        with heatmap_col1:
+            fig = category_heatmap(
+                filtered_df,
+                "Attack_Type",
+                "Impact_Primary",
+                "Attack Type by Primary Impact",
+            )
+            if fig:
+                st.plotly_chart(fig, width="stretch")
+            else:
+                st.info("Not enough data to build attack-impact heatmap.")
+
+        with heatmap_col2:
+            fig = category_heatmap(
+                filtered_df,
+                "Attack_Type",
+                "IdP_Context",
+                "Attack Type by IdP Context",
+            )
+            if fig:
+                st.plotly_chart(fig, width="stretch")
+            else:
+                st.info("Not enough data to build attack-IdP heatmap.")
+
+        st.divider()
+
+        st.markdown("## Misconfiguration and control-gap trends")
+
+        misconfig_long = any_occurrence_long(
+            filtered_df,
+            "Misconfig_1",
+            "Misconfig_2",
+            "Misconfiguration",
+        )
+
+        controls_long = any_occurrence_long(
+            filtered_df,
+            "Controls_1",
+            "Controls_2",
+            "Control Gap",
+        )
+
+        trend_col3, trend_col4 = st.columns(2)
+
+        with trend_col3:
+            if not misconfig_long.empty:
+                st.plotly_chart(
+                    stacked_year_bar(
+                        misconfig_long,
+                        "Misconfiguration",
+                        "Misconfigurations Over Time",
+                        top_n=5,
+                    ),
+                    width="stretch",
+                )
+            else:
+                st.info("No misconfiguration trend data available.")
+
+        with trend_col4:
+            if not controls_long.empty:
+                st.plotly_chart(
+                    stacked_year_bar(
+                        controls_long,
+                        "Control Gap",
+                        "Control Gaps Over Time",
+                        top_n=5,
+                    ),
+                    width="stretch",
+                )
+            else:
+                st.info("No control-gap trend data available.")
+
+        st.warning(
+            "Interpretation note: these are trends in public reporting, not confirmed prevalence across all organizations. "
+            "The value is in identifying recurring patterns and defensive priorities."
+        )
+
+        st.divider()
+
+        st.markdown("## What this suggests for defenders")
+
+        insight_col1, insight_col2, insight_col3 = st.columns(3)
+
+        with insight_col1:
+            st.container(border=True).markdown(
+                "### Prioritize app governance\n"
+                "Repeated OAuth abuse patterns point to the need for stronger consent review, app inventory, and app approval workflows."
+            )
+
+        with insight_col2:
+            st.container(border=True).markdown(
+                "### Treat tokens as access paths\n"
+                "OAuth tokens and refresh tokens should be treated as durable access artifacts, not just temporary byproducts of login."
+            )
+
+        with insight_col3:
+            st.container(border=True).markdown(
+                "### Monitor API behavior\n"
+                "Detection should look beyond sign-in events and include suspicious OAuth grants, app changes, and abnormal SaaS API usage."
+            )
 
 # -------------------------------------------------------------------
 # Findings Explorer
@@ -612,7 +954,6 @@ with tab_findings:
                 "Source_URL": st.column_config.LinkColumn("Source URL"),
             },
         )
-
 
 # -------------------------------------------------------------------
 # Incident Explorer
