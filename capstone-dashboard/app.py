@@ -494,6 +494,33 @@ def category_heatmap(
     )
     return fig
 
+def blueprint_tier_guide():
+    """Explain Blueprint Tier values in plain language."""
+    tier_col1, tier_col2, tier_col3 = st.columns(3)
+
+    with tier_col1:
+        st.container(border=True).markdown(
+            "### Start Here\n"
+            "Baseline controls that reduce the most common or highest-impact OAuth abuse paths "
+            "with the lowest implementation complexity. These are the first controls a small or "
+            "resource-constrained organization should prioritize."
+        )
+
+    with tier_col2:
+        st.container(border=True).markdown(
+            "### Next\n"
+            "Follow-on controls that improve governance, detection, review, and response after "
+            "the baseline is in place. These often require more coordination across identity, "
+            "SaaS administration, and SOC workflows."
+        )
+
+    with tier_col3:
+        st.container(border=True).markdown(
+            "### Advanced\n"
+            "Higher-maturity controls that require deeper engineering, tuning, automation, or "
+            "ongoing operational ownership. These are valuable, but they are not the first "
+            "dependency for most organizations."
+        )
 
 def any_occurrence_long(
     data: pd.DataFrame,
@@ -1170,6 +1197,9 @@ with tab_defense:
                 "### Remaining gap\n"
                 "What still requires process, monitoring, review, or operational response?"
             )
+
+        st.markdown("## Blueprint tier guide")
+        blueprint_tier_guide()
 
         st.divider()
 
