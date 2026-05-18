@@ -14,8 +14,8 @@ st.set_page_config(
     layout="wide",
 )
 
-DATA_PATH = Path("data/Sanitized_Export.csv")
-COVERAGE_PATH = Path("data/Defense_Coverage_Matrix.xlsx")
+DATA_PATH = Path("capstone-dashboard/data/Sanitized_Export.csv")
+COVERAGE_PATH = Path("capstone-dashboard/data/Defense_Coverage_Matrix.xlsx")
 
 REQUIRED_COLUMNS = [
     "Incident_ID",
