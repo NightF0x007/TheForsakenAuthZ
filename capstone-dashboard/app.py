@@ -278,6 +278,110 @@ def donut_chart(counts_df: pd.DataFrame, names_col: str, values_col: str, title:
     )
     return fig
 
+def dot_escape(value: str) -> str:
+    """Escape text for Graphviz node labels."""
+    return str(value).replace('"', "'").replace("\n", " ")
+
+
+def defense_flow_diagram(
+    misconfiguration: str,
+    control_family: str,
+    blueprint_tier: str,
+):
+    """Render a simple risk-to-defense flow diagram."""
+    misconfiguration = dot_escape(misconfiguration)
+    control_family = dot_escape(control_family)
+    blueprint_tier = dot_escape(blueprint_tier)
+
+    return f"""
+    digraph {{
+        graph [
+            rankdir=LR,
+            bgcolor="transparent",
+            pad="0.25",
+            nodesep="0.6",
+            ranksep="0.7"
+        ]
+
+        node [
+            shape=box,
+            style="rounded,filled",
+            fontname="Arial",
+            fontsize=14,
+            margin="0.18,0.12",
+            fillcolor="#F8FAFC",
+            color="#CBD5E1"
+        ]
+
+        edge [
+            color="#64748B",
+            arrowsize=0.8
+        ]
+
+        attack [
+            label="OAuth abuse pattern"
+        ]
+
+        misconfig [
+            label="Misconfiguration\\n{misconfiguration}",
+            fillcolor="#FEF3C7"
+        ]
+
+        control [
+            label="Primary control family\\n{control_family}",
+            fillcolor="#DBEAFE"
+        ]
+
+        baseline [
+            label="Recommended hardened baseline",
+            fillcolor="#DCFCE7"
+        ]
+
+        gap [
+            label="Residual gap / process need",
+            fillcolor="#FEE2E2"
+        ]
+
+        tier [
+            label="Blueprint tier\\n{blueprint_tier}",
+            fillcolor="#EDE9FE"
+        ]
+
+        attack -> misconfig -> control -> baseline -> gap -> tier
+    }}
+    """
+
+
+def add_incident_counts_to_coverage(
+    coverage_df: pd.DataFrame,
+    incidents_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Add any-occurrence incident counts to Defense Coverage Matrix rows."""
+    if coverage_df.empty:
+        return coverage_df.copy()
+
+    misconfig_counts = any_occurrence_count(
+        incidents_df,
+        "Misconfig_1",
+        "Misconfig_2",
+        "Misconfiguration",
+    )
+
+    if misconfig_counts.empty:
+        output = coverage_df.copy()
+        output["Incident Count"] = 0
+        output["Incident Percent"] = 0.0
+        return output
+
+    count_map = dict(zip(misconfig_counts["Misconfiguration"], misconfig_counts["Count"]))
+    percent_map = dict(zip(misconfig_counts["Misconfiguration"], misconfig_counts["Percent"]))
+
+    output = coverage_df.copy()
+    output["Incident Count"] = output["Misconfiguration Category"].map(count_map).fillna(0).astype(int)
+    output["Incident Percent"] = output["Misconfiguration Category"].map(percent_map).fillna(0.0)
+
+    return output
+
 def horizontal_bar(counts_df: pd.DataFrame, category_col: str, value_col: str, title: str):
     chart_df = counts_df.sort_values(value_col, ascending=True)
     fig = px.bar(
@@ -1000,171 +1104,290 @@ with tab_incidents:
 # -------------------------------------------------------------------
 
 with tab_defense:
-    st.subheader("Defense Coverage Matrix")
-
+    st.markdown("# Defense Coverage Matrix")
     st.markdown(
-        """
-This tab connects the coded misconfiguration taxonomy to vendor-neutral defense coverage.
-Use it as the dashboard version of the capstone Defense Coverage Matrix: what control family applies,
-what it is supposed to cover, what the hardened baseline should be, and what residual gap remains.
-"""
+        "Use this view to translate OAuth abuse patterns into practical hardening decisions."
     )
 
     if coverage_summary_df.empty:
         st.warning(
             "Defense Coverage Matrix workbook not found or not readable. "
-            "Place it at `data/Defense_Coverage_Matrix.xlsx`."
+            "Place it at `capstone-dashboard/data/Defense_Coverage_Matrix.xlsx`."
         )
         st.code(
             "project-root/\n"
             "├── app.py\n"
-            "└── data/\n"
-            "    ├── Sanitized_Export.csv\n"
-            "    └── Defense_Coverage_Matrix.xlsx",
+            "└── capstone-dashboard/\n"
+            "    └── data/\n"
+            "        ├── Sanitized_Export.csv\n"
+            "        └── Defense_Coverage_Matrix.xlsx",
             language="text",
         )
     else:
-        filtered_misconfigs = get_any_occurrence_values(filtered_df, "Misconfig_1", "Misconfig_2")
-        incident_coverage_df = coverage_for_misconfigs(coverage_summary_df, filtered_misconfigs)
+        filtered_misconfigs = get_any_occurrence_values(
+            filtered_df,
+            "Misconfig_1",
+            "Misconfig_2",
+        )
+
+        incident_coverage_df = coverage_for_misconfigs(
+            coverage_summary_df,
+            filtered_misconfigs,
+        )
+
         missing_matrix_rows = sorted(
             filtered_misconfigs - set(coverage_summary_df["Misconfiguration Category"])
         )
 
+        coverage_with_counts = add_incident_counts_to_coverage(
+            coverage_summary_df,
+            filtered_df,
+        )
+
+        incident_coverage_with_counts = add_incident_counts_to_coverage(
+            incident_coverage_df,
+            filtered_df,
+        )
+
+        st.markdown("## How to read this matrix")
+
+        read_col1, read_col2, read_col3 = st.columns(3)
+
+        with read_col1:
+            st.container(border=True).markdown(
+                "### Risk pattern\n"
+                "Which misconfiguration shows up in the coded incidents?"
+            )
+
+        with read_col2:
+            st.container(border=True).markdown(
+                "### Defense coverage\n"
+                "Which control family reduces or detects that risk?"
+            )
+
+        with read_col3:
+            st.container(border=True).markdown(
+                "### Remaining gap\n"
+                "What still requires process, monitoring, review, or operational response?"
+            )
+
+        st.divider()
+
         metric1, metric2, metric3, metric4 = st.columns(4)
+
         metric1.metric("Matrix Categories", len(coverage_summary_df))
-        metric2.metric("Categories in Current Filters", len(incident_coverage_df))
+        metric2.metric("Relevant to Current Filters", len(incident_coverage_df))
         metric3.metric(
             "Start Here Controls",
             int((coverage_summary_df["Blueprint Tier"].str.strip() == "Start Here").sum()),
         )
         metric4.metric(
-            "Residual Gaps Documented",
+            "Residual Gaps",
             int(coverage_summary_df["Residual Gap / Process Need"].astype(bool).sum()),
         )
 
+        st.divider()
+
+        st.markdown("## Risk-to-defense flow")
+
         view_mode = st.radio(
-            "Coverage view",
-            ["Only categories present in current filters", "All matrix categories"],
+            "Coverage scope",
+            ["Only risks present in current filters", "All matrix categories"],
             horizontal=True,
         )
 
         base_coverage_df = (
-            incident_coverage_df
-            if view_mode == "Only categories present in current filters"
-            else coverage_summary_df.copy()
+            incident_coverage_with_counts
+            if view_mode == "Only risks present in current filters"
+            else coverage_with_counts
         )
 
-        filter_col1, filter_col2 = st.columns(2)
-        with filter_col1:
-            tiers = sorted([x for x in base_coverage_df["Blueprint Tier"].unique() if x])
-            selected_tiers = st.multiselect("Blueprint tier", tiers, default=tiers)
-        with filter_col2:
-            purposes = sorted([x for x in base_coverage_df["Coverage Purpose"].unique() if x])
-            selected_purposes = st.multiselect("Coverage purpose", purposes, default=purposes)
-
-        filtered_coverage_view = base_coverage_df.copy()
-        if selected_tiers:
-            filtered_coverage_view = filtered_coverage_view[
-                filtered_coverage_view["Blueprint Tier"].isin(selected_tiers)
-            ]
-        if selected_purposes:
-            filtered_coverage_view = filtered_coverage_view[
-                filtered_coverage_view["Coverage Purpose"].isin(selected_purposes)
-            ]
-
-        st.markdown("## Priority Controls: Start Here")
-
-        start_here_df = filtered_coverage_view[
-            filtered_coverage_view["Blueprint Tier"].str.strip() == "Start Here"
-        ].copy()
-
-        if start_here_df.empty:
-            st.info("No Start Here controls are present in the current coverage view.")
+        if base_coverage_df.empty:
+            st.info("No Defense Coverage Matrix rows match the current filters.")
         else:
-            for _, row in start_here_df.iterrows():
-                with st.container(border=True):
-                    st.markdown(f"### {row['Misconfiguration Category']}")
-                    st.markdown(f"**Primary Control Family:** {row['Primary Control Family']}")
-                    st.markdown(f"**Coverage Purpose:** {row['Coverage Purpose']}")
+            base_coverage_df = base_coverage_df.sort_values(
+                ["Incident Count", "Blueprint Tier", "Misconfiguration Category"],
+                ascending=[False, True, True],
+            )
 
-                    with st.expander("Default posture question"):
-                        st.write(row["Default Posture Question"])
+            selected_category = st.selectbox(
+                "Select a misconfiguration category",
+                base_coverage_df["Misconfiguration Category"].tolist(),
+            )
 
-                    with st.expander("Recommended hardened baseline"):
-                        st.write(row["Recommended Hardened Baseline"])
+            selected_row = base_coverage_df[
+                base_coverage_df["Misconfiguration Category"] == selected_category
+            ].iloc[0]
 
-                    with st.expander("Residual gap / process need"):
-                        st.write(row["Residual Gap / Process Need"])
-
-        st.markdown("### Coverage Summary")
-        st.dataframe(
-            filtered_coverage_view,
-            width="stretch",
-            hide_index=True,
-            column_config={
-                "Default Posture Question": st.column_config.TextColumn(width="large"),
-                "Recommended Hardened Baseline": st.column_config.TextColumn(width="large"),
-                "Residual Gap / Process Need": st.column_config.TextColumn(width="large"),
-            },
-        )
-
-        if not filtered_coverage_view.empty:
-            st.markdown("### Blueprint Tier Distribution")
-            tier_counts = filtered_coverage_view["Blueprint Tier"].value_counts().reset_index()
-            tier_counts.columns = ["Blueprint Tier", "Count"]
-            st.plotly_chart(
-                horizontal_bar(
-                    tier_counts,
-                    "Blueprint Tier",
-                    "Count",
-                    "Blueprint Tier Distribution",
+            st.graphviz_chart(
+                defense_flow_diagram(
+                    selected_row["Misconfiguration Category"],
+                    selected_row["Primary Control Family"],
+                    selected_row["Blueprint Tier"],
                 ),
-                width="stretch",
+                use_container_width=True,
             )
 
-            st.download_button(
-                "Download current coverage view as CSV",
-                data=filtered_coverage_view.to_csv(index=False).encode("utf-8"),
-                file_name="filtered_defense_coverage_matrix.csv",
-                mime="text/csv",
-            )
+            st.markdown("## Defense action card")
 
-        if missing_matrix_rows:
-            st.warning(
-                "The current filtered incidents include misconfiguration categories that are not in the Defense Coverage Matrix: "
-                + ", ".join(missing_matrix_rows)
-            )
+            action_col1, action_col2 = st.columns([1, 1])
+
+            with action_col1:
+                st.container(border=True).markdown(
+                    f"### Selected risk pattern\n"
+                    f"**{selected_row['Misconfiguration Category']}**\n\n"
+                    f"**Observed in filtered dataset:** "
+                    f"{selected_row['Incident Count']} incident(s) "
+                    f"({selected_row['Incident Percent']}%)\n\n"
+                    f"**Primary control family:**  \n"
+                    f"{selected_row['Primary Control Family']}\n\n"
+                    f"**Blueprint tier:**  \n"
+                    f"{selected_row['Blueprint Tier']}"
+                )
+
+            with action_col2:
+                st.container(border=True).markdown(
+                    f"### What this control is trying to do\n"
+                    f"{selected_row['Coverage Purpose']}"
+                )
+
+            baseline_col, gap_col = st.columns(2)
+
+            with baseline_col:
+                st.markdown("### Recommended hardened baseline")
+                st.success(selected_row["Recommended Hardened Baseline"])
+
+            with gap_col:
+                st.markdown("### Residual gap / process need")
+                st.warning(selected_row["Residual Gap / Process Need"])
+
+            with st.expander("Show default posture question"):
+                st.write(selected_row["Default Posture Question"])
+
+            st.divider()
+
+            st.markdown("## Matrix coverage overview")
+
+            chart_col1, chart_col2 = st.columns(2)
+
+            with chart_col1:
+                tier_counts = (
+                    base_coverage_df["Blueprint Tier"]
+                    .value_counts()
+                    .reset_index()
+                )
+                tier_counts.columns = ["Blueprint Tier", "Count"]
+
+                st.plotly_chart(
+                    horizontal_bar(
+                        tier_counts,
+                        "Blueprint Tier",
+                        "Count",
+                        "Controls by Blueprint Tier",
+                    ),
+                    width="stretch",
+                )
+
+            with chart_col2:
+                incident_rank = base_coverage_df[
+                    base_coverage_df["Incident Count"] > 0
+                ][
+                    ["Misconfiguration Category", "Incident Count"]
+                ].sort_values("Incident Count", ascending=False)
+
+                if not incident_rank.empty:
+                    st.plotly_chart(
+                        horizontal_bar(
+                            incident_rank.head(10),
+                            "Misconfiguration Category",
+                            "Incident Count",
+                            "Risk Patterns Seen in Current Dataset",
+                        ),
+                        width="stretch",
+                    )
+                else:
+                    st.info("No incident-linked matrix categories for the current filters.")
+
+            if missing_matrix_rows:
+                st.warning(
+                    "Some filtered incident misconfiguration categories are not represented in the Defense Coverage Matrix: "
+                    + ", ".join(missing_matrix_rows)
+                )
+
+            st.divider()
+
+            with st.expander("Show full Defense Coverage Matrix"):
+                st.dataframe(
+                    base_coverage_df[
+                        [
+                            "Misconfiguration Category",
+                            "Incident Count",
+                            "Incident Percent",
+                            "Primary Control Family",
+                            "Coverage Purpose",
+                            "Default Posture Question",
+                            "Recommended Hardened Baseline",
+                            "Residual Gap / Process Need",
+                            "Blueprint Tier",
+                        ]
+                    ],
+                    width="stretch",
+                    hide_index=True,
+                    column_config={
+                        "Default Posture Question": st.column_config.TextColumn(width="large"),
+                        "Recommended Hardened Baseline": st.column_config.TextColumn(width="large"),
+                        "Residual Gap / Process Need": st.column_config.TextColumn(width="large"),
+                    },
+                )
+
+                st.download_button(
+                    "Download current matrix view as CSV",
+                    data=base_coverage_df.to_csv(index=False).encode("utf-8"),
+                    file_name="defense_coverage_matrix_view.csv",
+                    mime="text/csv",
+                )
 
         if not platform_tracker_df.empty:
-            st.markdown("### Optional Platform Evidence Tracker")
-            platform_col1, platform_col2 = st.columns(2)
+            with st.expander("Show optional platform evidence tracker"):
+                platform_col1, platform_col2 = st.columns(2)
 
-            with platform_col1:
-                platforms = sorted([x for x in platform_tracker_df["Platform"].unique() if x])
-                selected_platforms = st.multiselect("Platform", platforms, default=platforms)
+                with platform_col1:
+                    platforms = sorted([x for x in platform_tracker_df["Platform"].unique() if x])
+                    selected_platforms = st.multiselect("Platform", platforms, default=platforms)
 
-            with platform_col2:
-                tracker_misconfigs = sorted(
-                    [x for x in platform_tracker_df["Misconfiguration Category"].unique() if x]
+                with platform_col2:
+                    tracker_misconfigs = sorted(
+                        [x for x in platform_tracker_df["Misconfiguration Category"].unique() if x]
+                    )
+                    default_tracker_misconfigs = [
+                        x for x in tracker_misconfigs if x in filtered_misconfigs
+                    ] or tracker_misconfigs
+                    selected_tracker_misconfigs = st.multiselect(
+                        "Misconfiguration category",
+                        tracker_misconfigs,
+                        default=default_tracker_misconfigs,
+                    )
+
+                tracker_view = platform_tracker_df.copy()
+
+                if selected_platforms:
+                    tracker_view = tracker_view[tracker_view["Platform"].isin(selected_platforms)]
+
+                if selected_tracker_misconfigs:
+                    tracker_view = tracker_view[
+                        tracker_view["Misconfiguration Category"].isin(selected_tracker_misconfigs)
+                    ]
+
+                st.dataframe(
+                    tracker_view,
+                    width="stretch",
+                    hide_index=True,
+                    column_config={
+                        "Evidence / Notes / URL": st.column_config.LinkColumn(
+                            "Evidence / Notes / URL"
+                        ),
+                    },
                 )
-                default_tracker_misconfigs = [
-                    x for x in tracker_misconfigs if x in filtered_misconfigs
-                ] or tracker_misconfigs
-                selected_tracker_misconfigs = st.multiselect(
-                    "Misconfiguration category",
-                    tracker_misconfigs,
-                    default=default_tracker_misconfigs,
-                )
-
-            tracker_view = platform_tracker_df.copy()
-            if selected_platforms:
-                tracker_view = tracker_view[tracker_view["Platform"].isin(selected_platforms)]
-            if selected_tracker_misconfigs:
-                tracker_view = tracker_view[
-                    tracker_view["Misconfiguration Category"].isin(selected_tracker_misconfigs)
-                ]
-
-            st.dataframe(tracker_view, width="stretch", hide_index=True)
 
 # -------------------------------------------------------------------
 # Analyst Appendix
