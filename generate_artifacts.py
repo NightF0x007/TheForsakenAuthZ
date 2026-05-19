@@ -75,7 +75,7 @@ OPTIONAL_COLUMNS = [
 SANITIZED_CSV_COLUMNS = [
     "Incident_ID", "Source_Date", "Year", "Attack_Type", "IdP_Context", "SaaS_Context",
     "Impact_Primary", "Entry_Vector", "Source_Org", "OAuth_Flow", "Token_Artifacts",
-    "Misconfig_1", "Misconfig_2", "Controls_1", "Controls_2", "Confidence",
+    "Misconfig_1", "Misconfig_2", "Controls_1", "Controls_2", "Confidence", "Source_URL",
 ]
 
 CATEGORY_COLUMNS = [
@@ -570,15 +570,27 @@ def rows_from_counter(
     denominator: int,
     categories: Optional[List[str]] = None,
     include_zero_picklist_values: bool = False,
+    sort_by_count: bool = True,
 ) -> List[Tuple[str, int, float]]:
+    """Build prevalence rows from a Counter.
+
+    When picklist categories are supplied, they are used only for tie-breaking
+    and optional zero-value inclusion. Prevalence outputs still sort high-to-low
+    by count so executive highlights and tables identify the true top values.
+    """
     if categories:
+        picklist_index = {category: i for i, category in enumerate(categories)}
         category_set = set(categories)
         keys = [c for c in categories if include_zero_picklist_values or counter.get(c, 0) > 0]
-        keys += sorted([k for k in counter if k not in category_set], key=lambda x: (-counter[x], x))
+        keys += [k for k in counter if k not in category_set]
+        if sort_by_count:
+            keys = sorted(keys, key=lambda x: (-int(counter.get(x, 0)), picklist_index.get(x, 9999), x))
+        else:
+            keys = [k for k in categories if include_zero_picklist_values or counter.get(k, 0) > 0]
+            keys += sorted([k for k in counter if k not in category_set], key=lambda x: (-int(counter.get(x, 0)), x))
     else:
-        keys = sorted(counter.keys(), key=lambda x: (-counter[x], x))
+        keys = sorted(counter.keys(), key=lambda x: (-int(counter[x]), x))
     return [(key, int(counter.get(key, 0)), pct(int(counter.get(key, 0)), denominator)) for key in keys]
-
 
 def top_rows(rows: List[Tuple[str, int, float]], n: int = 2) -> List[Tuple[str, int, float]]:
     return rows[:n]
