@@ -1320,41 +1320,44 @@ with tab_problem:
     st.markdown("# The Problem")
 
     st.info(
-        "OAuth is the mechanism that lets one application access another service without sharing a user’s password. "
-        "That convenience also creates a security problem: if an attacker tricks a user, compromises an app, or steals a token, "
-        "they may keep access even after the normal login event is over."
+        "OAuth-based access is difficult to investigate because it often appears as trusted application activity, "
+        "token use, or API access rather than a clearly malicious login. The core problem is not simply that attackers "
+        "can act after login; it is that defenders may struggle to identify which app, token, permission, or integration "
+        "created the access path and which control should reduce the risk."
     )
 
     col1, col2, col3 = st.columns(3)
 
     with col1:
         st.container(border=True).markdown(
-            "### 1. User or admin authorizes access\n"
-            "A person signs in or approves an app request."
+            "### 1. Activity looks trusted\n"
+            "The event may appear as normal app access, token use, or API activity."
         )
 
     with col2:
         st.container(border=True).markdown(
-            "### 2. App receives a token\n"
-            "The token becomes the app’s permission to call APIs."
+            "### 2. Root cause is unclear\n"
+            "Investigators must determine whether the issue is consent, app governance, token theft, workload identity, or integration compromise."
         )
 
     with col3:
         st.container(border=True).markdown(
-            "### 3. Attacker abuses that trust\n"
-            "If the app, token, or consent process is weak, access can persist."
+            "### 3. Response is fragmented\n"
+            "Containment may require revoking tokens, disabling apps, rotating credentials, reviewing grants, and updating controls."
         )
 
     st.markdown("## Why this matters")
     st.markdown(
         """
-        Security teams often know how to respond to suspicious logins, malware, or endpoint alerts.
-        OAuth abuse is harder because the activity can look like normal application access.
-        This project turns scattered public incident reporting into a vendor-neutral view of:
-        
-        - which OAuth abuse patterns appear most often,
-        - which misconfigurations enable them,
-        - and which controls reduce the risk.
+        Traditional investigation often starts with sign-in events, endpoint alerts, or malware indicators.
+        OAuth abuse can be harder because the suspicious activity may occur through approved applications,
+        delegated permissions, refresh tokens, service principals, or trusted integrations.
+
+        This project helps security teams answer three practical questions:
+
+        - **What happened?** Identify the OAuth abuse mechanism and entry vector.
+        - **Why did it work?** Map the incident to a misconfiguration or control gap.
+        - **What should we do next?** Use the Defense Roadmap and SOC runbook steps to guide hardening and response.
         """
     )
 
