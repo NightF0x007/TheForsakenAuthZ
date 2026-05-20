@@ -627,6 +627,326 @@ def any_occurrence_long(
 
     return pd.DataFrame(rows)
 
+SCHEMA_DICTIONARY = {
+    "Attack Types": [
+        {
+            "Value": "Malicious OAuth app / delegated consent abuse",
+            "Definition": "Victim grants delegated permissions to an attacker-controlled OAuth app.",
+            "Use when": "Consent is the key enabling step and the app is newly malicious or attacker-controlled.",
+        },
+        {
+            "Value": "Compromised legitimate OAuth app (trusted integration abuse)",
+            "Definition": "A legitimate, already-trusted integration is abused through stolen tokens, secrets, or vendor compromise.",
+            "Use when": "The abused identity is an existing trusted app or integration rather than a newly malicious app.",
+        },
+        {
+            "Value": "Bearer token replay (stolen access/refresh token)",
+            "Definition": "Attacker reuses a stolen bearer artifact to access APIs or resources.",
+            "Use when": "Replay of a stolen user/session-level access token or refresh token is the core mechanism.",
+        },
+        {
+            "Value": "Device code phishing (device authorization grant abuse)",
+            "Definition": "Victim completes a device-code flow using an attacker-provided code.",
+            "Use when": "The device authorization flow yields tokens to the attacker.",
+        },
+        {
+            "Value": "Authorization code interception attack (redirect/code interception)",
+            "Definition": "Authorization code or authorization response is captured before token issuance.",
+            "Use when": "The primary mechanism is redirect/code interception, open redirect chaining, or missing PKCE-style hardening.",
+        },
+        {
+            "Value": "Client credentials compromise (client secret/certificate)",
+            "Definition": "A workload or application credential is compromised and used for unattended API access.",
+            "Use when": "Client secret, certificate, or equivalent app credential compromise is the OAuth abuse mechanism.",
+        },
+        {
+            "Value": "Workload identity abuse (domain-wide delegation/service principal)",
+            "Definition": "High-privilege workload identity mechanisms are abused to access APIs at scale.",
+            "Use when": "Privileged delegation, app-only access, or service principal access is the core abuse mechanism.",
+        },
+        {
+            "Value": "Cross-app OAuth attack (COAT/CORF) via integration platform",
+            "Definition": "An integration-platform design flaw enables cross-app pivoting or authorization confusion.",
+            "Use when": "An integration platform mediates the abuse across connected apps.",
+        },
+        {
+            "Value": "Token forgery / signing-key abuse (forged JWT/bearer token)",
+            "Definition": "Attacker forges or signs tokens because signing material, issuer trust, or validation assumptions are compromised.",
+            "Use when": "The source describes forged JWTs, signing-key compromise, or issuer/validation trust failure as the token mechanism.",
+        },
+        {
+            "Value": "Other / Unknown",
+            "Definition": "The OAuth mechanism cannot be confidently mapped to a defined category.",
+            "Use when": "The report still meets inclusion criteria but the exact OAuth mechanism is unclear. Use sparingly.",
+        },
+    ],
+    "Entry Vectors": [
+        {
+            "Value": "User interaction (phishing/social engineering)",
+            "Definition": "Victim user performs an action to complete authentication or authorization.",
+            "Use when": "A non-admin user clicks, signs in, approves, follows device-code instructions, or otherwise interacts with attacker-controlled content.",
+        },
+        {
+            "Value": "Admin interaction (consent/social engineering)",
+            "Definition": "An administrator or high-privilege role performs the enabling action.",
+            "Use when": "Admin consent, admin-completed authentication, or admin approval is central to the chain.",
+        },
+        {
+            "Value": "Compromised account",
+            "Definition": "Attacker gains control of a user or admin account and uses it to grant consent, modify apps, or access SaaS data.",
+            "Use when": "The earliest enabling step is account compromise rather than OAuth consent itself.",
+        },
+        {
+            "Value": "Token stolen (endpoint/logs/session artifacts)",
+            "Definition": "Attacker obtains tokens or session artifacts without a fresh authorization action.",
+            "Use when": "Tokens are stolen from browser storage, logs, proxies, malware, endpoint compromise, or session artifacts.",
+        },
+        {
+            "Value": "Leaked client secret / credential",
+            "Definition": "Attacker obtains a workload or app credential.",
+            "Use when": "The initial access material is a client secret, certificate, API key, service principal credential, or similar app credential.",
+        },
+        {
+            "Value": "Third-party integration compromise",
+            "Definition": "Access originates from compromise of a legitimate vendor or integration with existing tenant access.",
+            "Use when": "The attack begins through supply-chain or integration compromise rather than the victim tenant directly.",
+        },
+        {
+            "Value": "Provider / IdP-side key or credential compromise",
+            "Definition": "A provider-side identity key, signing credential, or equivalent trust anchor is compromised.",
+            "Use when": "The source identifies IdP/provider-side key material or signing infrastructure as the initial enabling material.",
+        },
+        {
+            "Value": "Other / Unknown",
+            "Definition": "The initial access path is not specific enough to classify.",
+            "Use when": "The report supports inclusion overall but does not explain the earliest access or authorization acquisition step.",
+        },
+    ],
+    "Misconfigurations": [
+        {
+            "Value": "User consent policy too permissive",
+            "Definition": "Delegated user consent is allowed too broadly, enabling risky app access with limited friction.",
+            "Use when": "User consent for sensitive scopes or low-friction app approval is the enabling weakness.",
+        },
+        {
+            "Value": "Admin consent governance weak",
+            "Definition": "Admin consent can be granted too easily or without adequate review.",
+            "Use when": "Admin approval is the pivotal enabling step and governance around that approval is weak.",
+        },
+        {
+            "Value": "App trust restrictions weak",
+            "Definition": "Trust gates such as publisher verification, allowlisting, or tenant restrictions are not enforced.",
+            "Use when": "An untrusted or weakly verified app could operate because trust controls were missing or insufficient.",
+        },
+        {
+            "Value": "Over-privileged scopes/roles",
+            "Definition": "OAuth scopes, app-only permissions, impersonation rights, or cloud roles exceed business need.",
+            "Use when": "Excessive permissions materially increase privilege, reach, persistence, or blast radius.",
+        },
+        {
+            "Value": "Token lifecycle controls weak",
+            "Definition": "Token lifetime, reuse, rotation, or revocation behavior materially extends attacker access.",
+            "Use when": "Refresh-token persistence or revocation limitations are central to the attack chain.",
+        },
+        {
+            "Value": "Credential / key material hygiene weak",
+            "Definition": "Client secrets, certificates, signing material, or app credentials are poorly protected, managed, or rotated.",
+            "Use when": "Secret, certificate, or key handling is the enabling condition.",
+        },
+        {
+            "Value": "OAuth flow / client hardening gaps",
+            "Definition": "Risky flows or weak client constraints enable token acquisition or misuse.",
+            "Use when": "Device code abuse, missing PKCE, weak redirect URI constraints, or legacy flow enablement dominate.",
+        },
+        {
+            "Value": "Workload identity / domain-wide delegation risky",
+            "Definition": "High-privilege workload identity patterns are enabled without sufficient guardrails.",
+            "Use when": "Tenant-wide app access, app-only access, or delegated workload patterns are the core enabler.",
+        },
+        {
+            "Value": "Third-party integration governance weak",
+            "Definition": "Trusted integrations are not sufficiently inventoried, constrained, owned, or re-certified.",
+            "Use when": "A legitimate integration’s posture, permissions, or governance is the real gap.",
+        },
+        {
+            "Value": "Monitoring / audit visibility insufficient",
+            "Definition": "Logging, retention, or visibility is inadequate to surface suspicious OAuth/app activity or downstream API abuse.",
+            "Use when": "The source identifies a real visibility failure, missing logging, missing retention, or central monitoring gap.",
+        },
+        {
+            "Value": "Token validation / issuer trust failure",
+            "Definition": "Token validation, issuer binding, signing-key trust, or accepted issuer assumptions are insufficient.",
+            "Use when": "Forged tokens, signing-key compromise, or issuer trust failure is the core weakness.",
+        },
+        {
+            "Value": "OAuth app governance weak",
+            "Definition": "Governance over who can create, register, credential, or materially modify OAuth applications is insufficient.",
+            "Use when": "Attacker success depends on easy app creation, credential addition, or weak review of app-object changes.",
+        },
+        {
+            "Value": "Other / Unknown",
+            "Definition": "The enabling weakness cannot be confidently mapped to a defined category.",
+            "Use when": "The source supports inclusion but does not provide enough detail for a defensible misconfiguration label.",
+        },
+    ],
+    "Control Gaps": [
+        {
+            "Value": "User consent restrictions / risk-based approval",
+            "Definition": "Controls that constrain delegated user consent through restrictions, approval workflows, or risk-based gating.",
+            "Use when": "User consent was too easy or risky permissions should have required review.",
+        },
+        {
+            "Value": "Admin consent approval workflow",
+            "Definition": "Controls that impose review, verification, and approval gates for privileged consent.",
+            "Use when": "Admin-granted permissions were central to the chain.",
+        },
+        {
+            "Value": "Periodic OAuth app access review (inventory + recertification)",
+            "Definition": "Routine inventorying and recertification of OAuth apps, integrations, owners, and permissions.",
+            "Use when": "Trusted access persisted without periodic review or ownership accountability.",
+        },
+        {
+            "Value": "App allowlisting / tenant restrictions",
+            "Definition": "Only approved apps, tenants, or publishers are permitted.",
+            "Use when": "Arbitrary apps, tenants, publishers, or integrations should not have been allowed.",
+        },
+        {
+            "Value": "Trusted publisher enforcement (publisher verification)",
+            "Definition": "Trust gating based on verified publisher identity or equivalent app reputation signals.",
+            "Use when": "Unverified publishers or weak trust signals enabled risky app access.",
+        },
+        {
+            "Value": "Restrict who can register OAuth apps",
+            "Definition": "Tenant policy limits who can create, register, credential, or modify OAuth clients.",
+            "Use when": "Low-privilege or inappropriate actors could register or modify apps.",
+        },
+        {
+            "Value": "Least-privilege scope policy (limit high-risk scopes)",
+            "Definition": "Policies and processes constrain permissions, scopes, and roles to business need.",
+            "Use when": "Impact depends on excessive delegated permissions, app-only rights, impersonation, or broad cloud roles.",
+        },
+        {
+            "Value": "Conditional Access / Policy-based access restrictions (session/device/location/flow)",
+            "Definition": "Policy-based restrictions on sessions, devices, locations, and risky authentication or authorization flows.",
+            "Use when": "Prevention depends on policy conditions or blocking risky flows.",
+        },
+        {
+            "Value": "Token revocation + session termination playbook",
+            "Definition": "Operational ability to rapidly revoke tokens, terminate sessions, and disable malicious app access.",
+            "Use when": "Containment speed or practiced revocation workflows materially affect response.",
+        },
+        {
+            "Value": "Refresh token lifetime / rotation policy",
+            "Definition": "Controls that reduce the persistence value of refresh tokens through lifetime, rotation, or reuse controls.",
+            "Use when": "Refresh-token longevity or replay value is central.",
+        },
+        {
+            "Value": "Credential / key material management (storage + rotation)",
+            "Definition": "Secure storage, restricted access, rotation cadence, and monitoring for client credentials and key material.",
+            "Use when": "Client secret, certificate, API key, or signing material compromise is causal.",
+        },
+        {
+            "Value": "OAuth client hardening (PKCE, redirect URI constraints, disable legacy flows)",
+            "Definition": "Client-configuration hardening that prevents unsafe flows, response interception, or weak OAuth client behavior.",
+            "Use when": "Flow/client hardening is the prevention story.",
+        },
+        {
+            "Value": "Domain-wide delegation / workload identity governance",
+            "Definition": "Guardrails on privileged workload identities, service principals, app-only access, and tenant-wide delegation.",
+            "Use when": "The core problem is an overly powerful or weakly governed workload identity mechanism.",
+        },
+        {
+            "Value": "Logging enabled + adequate retention",
+            "Definition": "Relevant audit logging is enabled and retained long enough for detection and investigation.",
+            "Use when": "Logging gaps harmed detection, investigation, or response.",
+        },
+        {
+            "Value": "Alerting on consent/app changes",
+            "Definition": "Alerts on app registration, consent grants, permission changes, or credential additions.",
+            "Use when": "Material configuration changes occurred without timely alerts.",
+        },
+        {
+            "Value": "Detection on anomalous OAuth/API behavior",
+            "Definition": "Behavioral detection and hunting for suspicious OAuth usage and abnormal SaaS API activity.",
+            "Use when": "Anomaly-based detection is the key missing layer after access is granted.",
+        },
+        {
+            "Value": "Token validation / issuer-binding hardening",
+            "Definition": "Controls that bind tokens to expected issuers, keys, audiences, tenants, and validation requirements.",
+            "Use when": "Forged tokens, issuer confusion, or validation trust failure is the defensive gap.",
+        },
+        {
+            "Value": "Other / Unknown",
+            "Definition": "The defensive gap is implied but not specific enough to map.",
+            "Use when": "The source supports a control gap but does not provide enough specificity for a defined category.",
+        },
+    ],
+    "Primary Impacts": [
+        {
+            "Value": "Data exfiltration",
+            "Definition": "Unauthorized access to or theft of business data, mail, files, repositories, records, or SaaS content.",
+            "Use when": "The main outcome is access to or extraction of data.",
+        },
+        {
+            "Value": "Email abuse (phishing/spam/BEC)",
+            "Definition": "Abuse of mail access to send spam, phishing, business email compromise, or related messaging abuse.",
+            "Use when": "The primary outcome is email or messaging abuse rather than data theft alone.",
+        },
+        {
+            "Value": "Persistence / stealth access",
+            "Definition": "Durable access that allows the attacker to remain present or re-enter without normal sign-in activity.",
+            "Use when": "The main concern is continuing access through tokens, apps, integrations, or workload identities.",
+        },
+        {
+            "Value": "Privilege escalation / admin takeover",
+            "Definition": "The attacker gains administrative capability, expands privileges, or takes over privileged tenant/app control.",
+            "Use when": "Privilege growth or administrative control is the primary operational impact.",
+        },
+        {
+            "Value": "Resource hijacking",
+            "Definition": "Cloud, SaaS, or compute resources are abused for attacker-controlled activity.",
+            "Use when": "The primary outcome is unauthorized use of resources, such as compute, automation, or infrastructure abuse.",
+        },
+        {
+            "Value": "Financial fraud",
+            "Definition": "The attack directly enables payment fraud, financial theft, or fraudulent business transactions.",
+            "Use when": "Financial loss or fraud is the primary business impact.",
+        },
+        {
+            "Value": "Other / Unknown",
+            "Definition": "The primary impact is unclear or does not fit the defined categories.",
+            "Use when": "The source supports inclusion but does not specify a clear primary outcome.",
+        },
+    ],
+}
+
+
+def render_schema_dictionary() -> None:
+    """Render selected controlled vocabulary definitions in the Appendix."""
+    st.markdown("### Controlled Vocabulary Definitions")
+    st.caption(
+        "Use this reference to interpret the category labels used in charts, tables, and scenario walkthroughs."
+    )
+
+    selected_dictionary = st.selectbox(
+        "Select definition set",
+        list(SCHEMA_DICTIONARY.keys()),
+        key="schema_dictionary_select",
+    )
+
+    dictionary_df = pd.DataFrame(SCHEMA_DICTIONARY[selected_dictionary])
+    st.dataframe(
+        dictionary_df,
+        width="stretch",
+        hide_index=True,
+        column_config={
+            "Value": st.column_config.TextColumn(width="medium"),
+            "Definition": st.column_config.TextColumn(width="large"),
+            "Use when": st.column_config.TextColumn(width="large"),
+        },
+    )
+
+
 def schema_guide():
     """Show selected coding schema content for dashboard readers."""
 
@@ -749,7 +1069,9 @@ def schema_guide():
 
     st.dataframe(fields_df, width="stretch", hide_index=True)
 
-    st.markdown("### Confidence guide")
+    render_schema_dictionary()
+
+    st.markdown("### Confidence Guide")
 
     confidence_df = pd.DataFrame(
         [
@@ -763,14 +1085,12 @@ def schema_guide():
             },
             {
                 "Confidence": "Low",
-                "Meaning": "Inferred or unclear; should be used sparingly.",
+                "Meaning": "Inferred or unclear; use sparingly and explain uncertainty when needed.",
             },
         ]
     )
 
     st.dataframe(confidence_df, width="stretch", hide_index=True)
-
-
 
 def render_findings_explorer() -> None:
     """Render the supporting-evidence drilldown used inside Risk Patterns."""
@@ -1199,38 +1519,29 @@ with tab_board:
 
     st.divider()
 
-    st.markdown("## How the dashboard turns findings into action")
+    st.markdown("## Recommended next steps")
 
     action_col1, action_col2, action_col3 = st.columns(3)
 
     with action_col1:
         st.container(border=True).markdown(
-            "### Risk Patterns\n"
-            "Use this tab to see how attack types, misconfigurations, and control gaps recur over time "
-            "and across the coded reports."
+            "### Next: Risk Patterns\n"
+            "Use the **Risk Patterns** tab above to see how attack types, misconfigurations, "
+            "and control gaps recur over time and across the coded reports."
         )
 
     with action_col2:
         st.container(border=True).markdown(
-            "### Defense Roadmap\n"
-            "Use this tab to map a selected misconfiguration to a control family, hardened baseline, "
-            "residual gap, and implementation tier."
+            "### Then: Defense Roadmap\n"
+            "Use the **Defense Roadmap** tab above to map a selected misconfiguration to a "
+            "control family, hardened baseline, residual gap, and implementation tier."
         )
 
     with action_col3:
         st.container(border=True).markdown(
-            "### Scenario Walkthrough\n"
-            "Use this tab to follow one incident from entry vector to OAuth abuse, misconfiguration, "
-            "control gap, and SOC response steps."
-        )
-
-    if not coverage_summary_df.empty:
-        start_here_count = int(
-            (coverage_summary_df["Blueprint Tier"].str.strip() == "Start Here").sum()
-        )
-        st.success(
-            f"Recommended next stop: open **Defense Roadmap**. The current Defense Coverage Matrix identifies "
-            f"{start_here_count} Start Here control categories that can anchor the prioritized hardening discussion."
+            "### Demo: Scenario Walkthrough\n"
+            "Use the **Scenario Walkthrough** tab above to follow one incident from entry vector "
+            "to OAuth abuse, misconfiguration, control gap, and SOC response steps."
         )
 
 # -------------------------------------------------------------------
