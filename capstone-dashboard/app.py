@@ -1396,9 +1396,10 @@ with tab_board:
     top_control_row = controls_any.iloc[0] if not controls_any.empty else None
 
     st.info(
-        "**Bottom line:** OAuth abuse should be treated as an application-governance and token-control problem, "
-        "not only as a login problem. The recurring pattern in the coded reports is that attackers exploit trusted "
-        "apps, delegated permissions, tokens, or weak visibility after normal authentication has already occurred."
+        "**Bottom line:** OAuth abuse should be treated as an application-governance, token-control, "
+        "and investigation problem, not only as a login problem. The recurring pattern in the coded "
+        "reports is that attackers exploit trusted apps, delegated permissions, tokens, integrations, "
+        "or weak visibility in ways that can make activity appear legitimate."
     )
 
     st.markdown("## What this summary answers")
