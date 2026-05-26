@@ -1870,8 +1870,9 @@ with tab_trends:
                 )
 
         st.info(
-            "Defensive implication: recurring techniques across public reports suggest where defenders should focus monitoring, "
-            "hardening, and tabletop planning. A spike or gap in reporting may reflect disclosure patterns as much as attacker activity."
+            "Defensive implication: repeated appearance in public reporting is a prioritization signal, not a global prevalence estimate. "
+            "Use recurring techniques to choose monitoring coverage, hardening priorities, and tabletop scenarios. "
+            "Interpret spikes or gaps cautiously because they may reflect disclosure patterns as much as attacker activity."
         )
 
         st.divider()
@@ -1914,8 +1915,8 @@ with tab_trends:
                     st.info("No entry vector data available for the current filters.")
 
         st.info(
-            "Defensive implication: separating the OAuth mechanism from the initial access path prevents the dashboard from treating all phishing, "
-            "token theft, or account compromise as the same security problem. The defensive response depends on both fields."
+            "Defensive implication: Attack Type identifies the OAuth abuse mechanism that must be defended; Entry Vector identifies where the attacker first obtained access, authorization material, or user/admin interaction. "
+            "Keeping these fields separate prevents a generic 'phishing' answer and helps determine whether the response should focus on consent controls, account security, token protection, app credentials, workload identities, or third-party integrations."
         )
 
         st.divider()
@@ -1958,7 +1959,7 @@ with tab_trends:
             st.info(
                 f"Defensive implication: the most common primary impact in the current filtered view is "
                 f"**{top_impact['Category']}** ({top_impact['Count']} cases / {top_impact['Percent']}%). "
-                "Impact context helps translate technical OAuth abuse into business and operational risk."
+                "Impact context helps translate OAuth abuse into business risk and should influence severity, evidence collection, stakeholder notification, and recovery priorities."
             )
 
         st.divider()
@@ -2015,9 +2016,8 @@ with tab_trends:
                     st.info("No control-gap trend data available.")
 
         st.info(
-            "Defensive implication: misconfiguration trends show the conditions that made abuse viable or more damaging. "
-            "Control-gap trends show where prevention, detection, or response capabilities were missing or weak. "
-            "Together, they explain why the Defense Roadmap focuses on governance, token controls, visibility, and response readiness."
+            "Defensive implication: misconfiguration trends explain why the OAuth abuse chain was viable or more damaging; control-gap trends explain what preventive, detective, or response capability was missing or weak. "
+            "Use the paired view to decide whether follow-up work belongs in governance, least privilege, token/session control, credential hygiene, app/integration review, logging, alerting, or SOC response readiness."
         )
 
         st.divider()
@@ -2037,19 +2037,19 @@ with tab_trends:
         with insight_col1:
             st.container(border=True).markdown(
                 "### Govern apps and consent\n"
-                "Repeated OAuth abuse patterns point to stronger consent review, app inventory, publisher/trust checks, and app approval workflows."
+                "Prioritize app inventory, consent restrictions, admin approval workflows, publisher/trust checks, and periodic access review so risky apps do not become durable access paths."
             )
 
         with insight_col2:
             st.container(border=True).markdown(
                 "### Treat tokens as access paths\n"
-                "OAuth tokens, refresh tokens, client credentials, and workload identities should be treated as durable access artifacts, not login byproducts."
+                "Refresh tokens, app credentials, service principals, and workload identities can preserve access after login appears normal. Response plans should include revocation, session termination, credential rotation, and owner validation."
             )
 
         with insight_col3:
             st.container(border=True).markdown(
                 "### Monitor OAuth and API behavior\n"
-                "Detection should look beyond sign-in events and include suspicious grants, app changes, credential additions, and abnormal SaaS API usage."
+                "Detection should include consent grants, app registration changes, credential additions, permission changes, token/session anomalies, and abnormal downstream SaaS API activity."
             )
 
 # -------------------------------------------------------------------
