@@ -21,31 +21,52 @@ CUSTOM_CSS = f"""
     h1, h2, h3 {{
         color: {UW_PURPLE};
     }}
+
+    /* KPI metric cards: force readable colors in light and dark mode */
     [data-testid="stMetric"] {{
-        background-color: #FFFFFF;
-        border: 1px solid {UW_BORDER};
-        border-radius: 0.75rem;
-        padding: 0.75rem;
+        background-color: #FFFFFF !important;
+        border: 1px solid {UW_BORDER} !important;
+        border-radius: 0.75rem !important;
+        padding: 0.75rem !important;
     }}
+
+    [data-testid="stMetric"] * {{
+        color: #111827 !important;
+    }}
+
     [data-testid="stMetricLabel"] p {{
-        color: {UW_PURPLE};
-        font-weight: 700;
+        color: {UW_PURPLE} !important;
+        font-weight: 700 !important;
     }}
+
+    [data-testid="stMetricValue"] {{
+        color: #111827 !important;
+        font-weight: 700 !important;
+    }}
+
+    [data-testid="stMetricDelta"] {{
+        color: #374151 !important;
+    }}
+
     .stTabs [data-baseweb="tab-list"] {{
         gap: 0.25rem;
     }}
+
     .stTabs [data-baseweb="tab"] {{
         border-radius: 0.75rem 0.75rem 0 0;
         padding: 0.6rem 0.9rem;
     }}
+
     .stTabs [aria-selected="true"] {{
         background-color: {UW_LIGHT_PURPLE};
         color: {UW_PURPLE};
         border-bottom: 3px solid {UW_GOLD};
     }}
+
     div[data-testid="stExpander"] details {{
         border-color: {UW_BORDER};
     }}
+
     .st-key-scenario_summary_card {{
         position: sticky;
         top: 3.25rem;
@@ -58,6 +79,18 @@ CUSTOM_CSS = f"""
         box-shadow: 0 0.35rem 1rem rgba(75, 46, 131, 0.12);
         backdrop-filter: blur(8px);
     }}
+
+    .st-key-scenario_summary_card * {{
+        color: #111827 !important;
+    }}
+
+    .st-key-scenario_summary_card h1,
+    .st-key-scenario_summary_card h2,
+    .st-key-scenario_summary_card h3,
+    .st-key-scenario_summary_card h4 {{
+        color: {UW_PURPLE} !important;
+    }}
+
     .st-key-scenario_summary_card p {{
         margin-bottom: 0.25rem;
     }}
