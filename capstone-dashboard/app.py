@@ -1205,10 +1205,10 @@ def schema_guide():
     st.dataframe(confidence_df, width="stretch", hide_index=True)
 
 def render_findings_explorer() -> None:
-    """Render the supporting-evidence drilldown used inside Risk Patterns."""
-    st.markdown("### Supporting Evidence Explorer")
+    """Render the -evidence drilldown used inside Risk Patterns."""
+    st.markdown("###  Evidence Explorer")
     st.markdown(
-        "Select a finding to see its frequency, supporting incidents, and Defense Coverage Matrix alignment."
+        "Select a finding to see its frequency,  incidents, and Defense Coverage Matrix alignment."
     )
 
     with st.expander("How to interpret these finding types", expanded=False):
@@ -1326,7 +1326,7 @@ def render_findings_explorer() -> None:
         else:
             supporting = filtered_df[filtered_df[source_column] == selected_finding]
 
-        st.markdown("## Supporting Incidents")
+        st.markdown("## Original Incidents")
 
         supporting_columns = [
             "Incident_ID",
